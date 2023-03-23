@@ -1,0 +1,12 @@
+
+	Pairwise comparisons using t tests with pooled SD 
+
+data:  rr_repeats_genes_long$wind_2mb and rr_repeats_genes_long$pos_group 
+
+  1       2       3       4     
+2 0.0044  -       -       -     
+3 0.0892  0.2993  -       -     
+4 < 2e-16 6.3e-08 5.1e-09 -     
+5 8.9e-08 0.0402  0.0046  0.0022
+
+P value adjustment method: holm 

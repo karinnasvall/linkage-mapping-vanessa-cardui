@@ -1,0 +1,23 @@
+
+Call:
+lm(formula = wind_2mb ~ chr_length + occ_length_SINE + occ_length_gc, 
+    data = rr_repeats_genes_wide_sc)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-4.7801 -1.3637 -0.2934  1.3905  8.1830 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)       4.0354     0.1632  24.728  < 2e-16 ***
+chr_length       -0.3247     0.2141  -1.517 0.130930    
+occ_length_SINE   0.9043     0.2446   3.696 0.000282 ***
+occ_length_gc     0.3393     0.2457   1.381 0.168767    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 2.186 on 202 degrees of freedom
+  (21 observations deleted due to missingness)
+Multiple R-squared:  0.2169,	Adjusted R-squared:  0.2053 
+F-statistic: 18.65 on 3 and 202 DF,  p-value: 1.013e-10
+

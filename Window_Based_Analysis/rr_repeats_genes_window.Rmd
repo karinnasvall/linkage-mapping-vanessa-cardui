@@ -1,0 +1,1333 @@
+---
+title: "rec_rate_vs_repeats_genes_window"
+author: "KN"
+date: "8/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup2, echo=FALSE}
+#install.packages("ggpubr")
+
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library("tidyr")
+library(plyr)
+library(dplyr)
+library(data.table)
+library(stringr)
+library(car)
+library(sjPlot)
+library(nord)
+library(sjstats)
+library(stargazer)
+
+
+```
+
+```{r get_data, echo=FALSE, eval=FALSE}
+
+rec_rate <- read.table("../../Link_map/rec_rate_est_220126/tables/rec_rate_windows.table")
+
+head(rec_rate)
+#only needed columns
+
+for(i in c(1:length(unique(rec_rate$map)))) {
+  #to get mean per window
+  rec_rate_bin_temp <- aggregate(rec_rate[rec_rate$map==unique(rec_rate$map)[i],c("loess", "wind_2mb")], #the data frame
+                 by=list(cut(rec_rate[rec_rate$map==unique(rec_rate$map)[i],"phys"],seq(1, rec_rate$chr_length[rec_rate$map==unique(rec_rate$map)[i]][1]+2000000, 2000000))), #the bins (see below) 
+                 mean, na.rm=T ) #the aggregating function
+  rec_rate_bin_temp$map <- unique(rec_rate$map)[i]
+  
+  rec_rate_bin_temp$loess_sd <- aggregate(rec_rate[rec_rate$map==unique(rec_rate$map)[i],]$loess, #the data frame
+                 by=list(cut(rec_rate[rec_rate$map==unique(rec_rate$map)[i],"phys"],seq(1, rec_rate$chr_length[rec_rate$map==unique(rec_rate$map)[i]][1]+2000000, 2000000))), #the bins (see below) 
+                 sd, na.rm=T ) #the aggregating function
+  rec_rate_bin_temp$loess_sd <- rec_rate_bin_temp$loess_sd$x
+
+    rec_rate_bin_temp$wd_sd <- aggregate(rec_rate[rec_rate$map==unique(rec_rate$map)[i],]$wind_2mb, #the data frame
+                 by=list(cut(rec_rate[rec_rate$map==unique(rec_rate$map)[i],"phys"],seq(1, rec_rate$chr_length[rec_rate$map==unique(rec_rate$map)[i]][1]+2000000, 2000000))), #the bins (see below) 
+                 sd, na.rm=T ) #the aggregating function
+  rec_rate_bin_temp$wd_sd <- rec_rate_bin_temp$wd_sd$x
+
+  #to get nr of markers per window
+  rec_rate_bin_temp$mkr <- aggregate(rec_rate[rec_rate$map==unique(rec_rate$map)[i],]$mkr, #the data frame
+                 by=list(cut(rec_rate[rec_rate$map==unique(rec_rate$map)[i],"phys"],seq(1, rec_rate$chr_length[rec_rate$map==unique(rec_rate$map)[i]][1]+2000000, 2000000))), #the bins (see below) 
+                 length) #the aggregating function
+  rec_rate_bin_temp$mkr <- rec_rate_bin_temp$mkr$x
+  
+  if (i==1) {
+    rec_rate_bin <- rec_rate_bin_temp
+  } else {
+  rec_rate_bin <- rbind(rec_rate_bin, rec_rate_bin_temp)
+  }
+}
+
+
+
+str(rec_rate_bin)
+head(rec_rate_bin)
+#check that nr of markers are the same as in sum stat
+aggregate(mkr~map, data=rec_rate_bin, sum)$mkr - aggregate(mkr~map,data=rec_rate, length)$mkr
+
+#make column with start values
+rec_rate_bin$begin <- 
+  as.integer(str_split(gsub(pattern='\\(|\\]', replacement = "", x=rec_rate_bin$Group.1), ",", simplify = TRUE)[,1])
+
+rec_rate_bin$begin <- 
+  ifelse(rec_rate_bin$begin==1, rec_rate_bin$begin, rec_rate_bin$begin + 1)
+
+rec_rate_bin$chrom <- rec_rate_bin$map
+
+#add chr length
+rec_rate_bin <- join(rec_rate_bin, unique(rec_rate[,c("map", "chr_length")]))
+
+
+```
+
+
+```{r get_analysis_data, echo=FALSE}
+
+feature_counts <- read.table("data/feature_counts_round_2_mod.tsv", header = T)
+feature_counts_new <- read.table("data/feature_counts_replace.tsv", header = T)
+
+#replace with new values
+test <- match(colnames(feature_counts_new),colnames(feature_counts))
+feature_counts[,names(feature_counts_new)] <- feature_counts_new
+
+
+#write.table(feature_counts, "data/feature_counts.csv", row.names = FALSE, quote = FALSE, sep = ",")
+
+rr_repeats_genes <- join(feature_counts, rec_rate_bin, by= c("chrom", "begin"))
+
+rr_repeats_genes$map <- NULL
+rr_repeats_genes$Group.1 <- NULL
+
+rr_repeats_genes[is.na(rr_repeats_genes$mkr),]$mkr <- 0
+
+#Change NaN to NA
+rr_repeats_genes <- rr_repeats_genes %>% mutate_all(~ifelse(is.nan(.), NA, .))
+
+rr_repeats_genes$chr_type <- "Autosome"
+rr_repeats_genes$chr_type[rr_repeats_genes$chrom=="LR999924.1"] <- "Z"
+rr_repeats_genes$chr_type[rr_repeats_genes$chrom=="LR999940.1"] <- "W"
+rr_repeats_genes$chr_type <- as.factor(rr_repeats_genes$chr_type)
+
+#get GC-content
+gc_content <- read.table("data/GCA_905220365.1_ilVanCard2.1_genomic_chroms.2MB.GC.tsv", header = T)
+#check rows
+gc_content$X3_usercol - rr_repeats_genes$end
+rr_repeats_genes$gc <- gc_content[,"X5_pct_gc"]
+
+
+#add new chr_lenght (gets alot of NA from the old)
+chr_length <- read.table("data/scaffold_length", header = T)
+colnames(chr_length) <- c("chrom", "chr_length2")
+
+rr_repeats_genes <- join(rr_repeats_genes, chr_length)
+rr_repeats_genes$chr_length <- rr_repeats_genes$chr_length2
+rr_repeats_genes$chr_length2 <- NULL
+str(rr_repeats_genes)
+
+#select columns based on string
+#select(rr_repeats_window, starts_with("length"))
+#or colnames(rr_repeats_genes[, grepl("length_", colnames(rr_repeats_genes))])
+#long format
+# rr_repeats_genes_long <- pivot_longer(rr_repeats_genes, select(rr_repeats_genes, starts_with("length")), names_to = "repeat_class", values_to = "proportion")
+# str(rr_repeats_genes_long)
+
+
+# rr_repeats_genes_long <- melt(setDT(rr_repeats_genes), measure.vars = list(names(select(rr_repeats_genes, starts_with("count"))),names(select(rr_repeats_genes, starts_with("length")))), variable.name = "gen_feat", value.name = c("count_var", "length_var"))
+
+rr_repeats_genes_long <- pivot_longer(rr_repeats_genes, cols =starts_with(c("length", "gc")),  names_to ="feature", names_prefix = "length_", values_to = "feat_length")
+
+
+#get density of repeats per kilobase: length/sequence length
+rr_repeats_genes_long$occ_length <- rr_repeats_genes_long$feat_length/(rr_repeats_genes_long$end-rr_repeats_genes_long$begin+1)
+
+#change back to prop for gc content
+rr_repeats_genes_long[rr_repeats_genes_long$feature == "gc",]$occ_length <- rr_repeats_genes_long[rr_repeats_genes_long$feature == "gc",]$feat_length
+
+#relative position (begin + end)/2 (in the middle of the window)
+rr_repeats_genes_long$rel_pos <- ((rr_repeats_genes_long$begin+rr_repeats_genes_long$end)/2)/rr_repeats_genes_long$chr_length
+str(rr_repeats_genes_long)
+
+rr_repeats_genes_long$pos_group <- cut(sqrt(((rr_repeats_genes_long$rel_pos*100)-50)^2), c(-Inf,10,20,30,40,Inf), c(1,2,3,4,5))
+str(rr_repeats_genes_long)
+
+
+#get wide format for 
+rr_repeats_genes_wide <- pivot_wider(rr_repeats_genes_long, names_from = feature, values_from = c(feat_length, occ_length))
+str(rr_repeats_genes_wide)
+
+```
+
+```{r tables, eval=FALSE, echo=FALSE}
+
+write.table(rr_repeats_genes_long, file="tables/rec_rate_vs_repeats_genes_2Mb_windows_long.table")
+
+
+#rr_repeats_genes_long <- read.table("tables/rec_rate_vs_repeats_genes_2Mb_windows_long.table")
+
+write.table(rr_repeats_genes_wide, file="tables/rec_rate_vs_repeats_genes_2Mb_windows.table") 
+
+#rr_repeats_genes_wide <- read.table(file="tables/rec_rate_vs_repeats_genes_2Mb_windows.table")
+
+#chromosome level dataframe
+repeat_chr_level <- pivot_wider(aggregate(occ_length~chrom+feature, rr_repeats_genes_long, mean), names_from = feature, values_from = occ_length)
+repeat_chr_level_tmp <- pivot_wider(aggregate(occ_length~chrom+feature, rr_repeats_genes_long, sd), names_from = feature, values_from = occ_length)
+repeat_chr_level <- inner_join(repeat_chr_level, repeat_chr_level_tmp, by="chrom", suffix = c("","_sd"))
+
+repeat_chr_level$chr_length <- unique(rr_repeats_genes_long$chr_length)
+repeat_chr_level$chr_type <- unique(rr_repeats_genes[,c("chrom","chr_type")])$chr_type
+repeat_chr_level$rr_mean_loess <- aggregate(rr_repeats_genes_long$loess, by=list(rr_repeats_genes_long$chrom), mean, na.rm=T)$x
+repeat_chr_level$rr_sd_loess <- aggregate(rr_repeats_genes_long$loess, by=list(rr_repeats_genes_long$chrom), sd,na.rm=T)$x
+repeat_chr_level$rr_mean_wind_2mb <- aggregate(rr_repeats_genes_long$wind_2mb, by=list(rr_repeats_genes_long$chrom), mean, na.rm=T)$x
+repeat_chr_level$rr_sd_wind_2mb <- aggregate(rr_repeats_genes_long$wind_2mb, by=list(rr_repeats_genes_long$chrom), sd,na.rm=T)$x
+
+write.table(repeat_chr_level, file = "tables/chr_level.table")
+
+
+#repeat_chr_level <- read.table(file = "tables/chr_level.table")
+
+#summary windowbased
+write(file="tables/summary_wd_based_rec_rate.txt", 
+      paste("Average rec rate: ",
+            mean(subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),])$wind_2mb),
+            "\nSd: ", 
+            sd(subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),])$wind_2mb), 
+            "\nMax: ",
+            max(subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),])$wind_2mb),
+            "\nMin: ",
+            min(subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),])$wind_2mb)))
+
+```
+
+
+
+```{r tests}
+
+#function to get the results in a table
+#https://stackoverflow.com/questions/34326906/extracting-and-formatting-results-of-cor-test-on-multiple-pairs-of-columns
+
+#run Shapiro-Wilk normality test
+#If normaldistr Pearson*s corr otherwise kendall or spearman
+#shapiro.test()
+
+corrFunc <- function(var1, var2, data) {
+  result = cor.test(data[,var1], data[,var2], method="pearson")
+  data.frame(var1, var2, result[c("estimate","p.value","statistic","method")], 
+             stringsAsFactors=FALSE)
+}
+
+
+
+
+#transfor into dataframe first
+#without W
+COR_TEST <- as.data.frame(rr_repeats_genes_wide[rr_repeats_genes_wide$chr_type!="W",])
+
+## Pairs of variables for which we want correlations
+
+#rec_rate
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["loess"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#rec_rate, wd2mb
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["wind_2mb"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec_wind = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+#tot_repeat_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_rpt"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_tot_repeat_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gen_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_CDS"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gene_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gc
+vars = data.frame(v1=names((COR_TEST)["occ_length_gc"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gc = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+corrs <- rbind(corrs_rec, corrs_rec_wind, corrs_tot_repeat_prop, corrs_gene_prop,corrs_gc)
+
+colnames(corrs) <- c("var1", "var2", "estimate", "p.value", "statistic", "method")
+
+#write.table(join(corrs_W, corrs_noW), "correlations.table")
+write.table(corrs, "tables/correlations_pearson.table")
+
+#####################################
+#spearman*s
+
+corrFunc <- function(var1, var2, data) {
+  result = cor.test(data[,var1], data[,var2], method="spearman")
+  data.frame(var1, var2, result[c("estimate","p.value","statistic","method")], 
+             stringsAsFactors=FALSE)
+}
+
+
+COR_TEST <- as.data.frame(rr_repeats_genes_wide[rr_repeats_genes_wide$chr_type!="W",])
+
+## Pairs of variables for which we want correlations
+
+#rec_rate
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["loess"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#rec_rate, wd2mb
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["wind_2mb"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec_wind = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+#tot_repeat_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_rpt"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_tot_repeat_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gen_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_CDS"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gene_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gc
+vars = data.frame(v1=names((COR_TEST)["occ_length_gc"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gc = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+corrs <- rbind(corrs_rec, corrs_rec_wind, corrs_tot_repeat_prop, corrs_gene_prop,corrs_gc)
+
+colnames(corrs) <- c("var1", "var2", "estimate", "p.value", "statistic", "method")
+
+#write.table(join(corrs_W, corrs_noW), "correlations.table")
+write.table(corrs, "tables/correlations_spearman.table")
+
+
+
+
+#####################################
+#removing last four chr
+COR_TEST <- as.data.frame(subset(rr_repeats_genes_wide, chr_type!="W" & chrom!="LR999952.1" & chrom!="LR999953.1" & chrom!="LR999954.1" & chrom!="LR999955.1"))
+
+## Pairs of variables for which we want correlations
+
+#rec_rate
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["loess"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#rec_rate, wd2mb
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["wind_2mb"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+# Apply corrFunc to all rows of vars
+corrs_rec_wind = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+#tot_repeat_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_rpt"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_tot_repeat_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gen_dens
+vars = data.frame(v1=names((COR_TEST)["occ_length_CDS"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gene_prop = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+#gc
+vars = data.frame(v1=names((COR_TEST)["occ_length_gc"]), v2=names(select(COR_TEST, starts_with("occ_"))))
+corrs_gc = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+
+corrs <- rbind(corrs_rec, corrs_rec_wind, corrs_tot_repeat_prop, corrs_gene_prop,corrs_gc)
+
+colnames(corrs) <- c("var1", "var2", "estimate", "p.value", "statistic", "method")
+
+#write.table(join(corrs_W, corrs_noW), "correlations.table")
+write.table(corrs, "tables/correlations_pearson_red.table")
+
+
+######
+#Cor with chr length
+COR_TEST <- as.data.frame(repeat_chr_level)
+
+## Pairs of variables for which we want correlations
+
+#rec_rate
+#vars = data.frame(v1=names(mtcars)[1], v2=names(mtcars)[-1])
+vars = data.frame(v1=names((COR_TEST)["chr_length"]), v2=names(select(COR_TEST, -c("chrom", "chr_length", "chr_type"))))
+# Apply corrFunc to all rows of vars
+corrs_length = do.call(rbind, mapply(corrFunc, vars[,1], vars[,2], MoreArgs=list(data=COR_TEST), 
+                              SIMPLIFY=FALSE))
+
+write.table(corrs_length, "tables/corr_chr_length.table")
+
+
+```
+
+```{r corr_heatmap}
+#corr_df <-  read.table("correlations.table")
+#corr_df <-  read.table("tables/correlations_pearson.table")
+corr_df <-  read.table("tables/correlations_spearman.table")
+
+
+corr_plot_rec_rate <- 
+ggplot(subset(corr_df[corr_df$var1=="loess",]), aes(var1, var2, fill=estimate)) + 
+  geom_tile(size=0) +
+  geom_text(aes(label=round(estimate, 2), colour=cut(p.value, c(-Inf, 0.05, Inf)))) +
+  scale_fill_gradient2() +
+  scale_colour_manual(name="p.value", 
+                      values = c("(-Inf, 0.05]" = "black",
+                                 "(0.05, Inf]" = "light grey")) +
+  scale_x_discrete(position = "top") +
+    theme(panel.background = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(size = 10, colour = "black"),
+        axis.title = element_blank(),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.key = element_blank(),
+        strip.placement = "outside",
+        strip.text = element_text(size = 12),
+        strip.background = element_blank())
+
+corr_plot_rec_rate
+
+geom.text.size = 7
+theme.size = (14/5) * geom.text.size
+
+
+corr_heatmap <-  
+ggplot(subset(corr_df, var1!="loess"), aes(var1, var2, fill=estimate)) + 
+  geom_tile() +
+  #coord_fixed()+
+  geom_text(aes(label=round(estimate, 2), colour=cut(p.value, c(-Inf, 0.05, Inf))), size = geom.text.size) +
+  scale_fill_gradient2(low = "blue", high = "orange") +
+  scale_colour_manual(name="p.value", 
+                      values = c("#363535", "red"),
+                      labels = c("< 0.05", "> 0.05")) +
+  scale_x_discrete(position = "top", 
+                   labels=c("CDS", "GC", "Total repeat", "Rec rate")) + 
+  scale_y_discrete(limits=rev(c("occ_length_gc", "occ_length_CDS", "occ_length_rpt","occ_length_LTR",  "occ_length_LINE", "occ_length_SINE", "occ_length_DNA"))
+                   ,labels=c("occ_length_CDS"="CDS", "occ_length_SINE"="SINE", "occ_length_DNA"="DNA", "occ_length_LINE"="LINE", "occ_length_LTR"="LTR",  "occ_length_rpt"="RPT", "occ_length_gc"="GC" )) +
+    theme(panel.background = element_blank(),
+          text = element_text(size = theme.size),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        legend.key = element_blank(),
+        strip.placement = "outside", 
+        strip.background = element_blank())
+
+ggsave(plot = corr_heatmap, file = "figures/corr_heatmap.pdf", device = "pdf")
+
+
+
+
+```
+
+```{r plots_correlation}
+#assign colour variables
+col_Z <- "#009294"   #"#005F60"
+col_W <- "#FAAB36"
+col_autosome <- "dark grey"
+#col_autosome <-     #darker grey
+
+col_rec_rate <- "#249EA0"
+col_repeats <- "#FD5900"
+col_gene <- "#FAAB36"
+
+
+#Linear correlation
+#obs no genes on the W so exclude the W
+repeat_vs_gene_proportion <- 
+ggplot(data=subset(rr_repeats_genes_wide, rr_repeats_genes_wide$chr_type!="W"), aes(occ_length_rpt, occ_length_CDS)) +
+    geom_point(aes(colour=chr_type, fill=chr_type),shape=21,size=1) +
+    geom_smooth(aes(colour=chr_type), method = "lm", fullrange=TRUE, se=FALSE) +
+    stat_cor(aes(colour=chr_type), show.legend=FALSE, method = "spearman", cor.coef.name = "rho") +
+    scale_colour_discrete(type = c(col_autosome, col_Z)) +
+    scale_fill_discrete(type = c(col_autosome, col_Z)) +
+    xlab("Repeat proportion") +
+    ylab("Gene proportion (CDS)") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+ggsave(plot=repeat_vs_gene_proportion, "figures/corr_rpt_vs_gene.pdf", device = "pdf")
+
+
+#remove na to make the plots nices (axis adjustments)
+#dat[!rowSums(is.na(dat[cols])), ]
+#rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "loess")])),]
+
+#multiplots all rec rate
+#proportion
+corr_prop_rr <- 
+  ggplot(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type!="W"), aes(occ_length, wind_2mb)) +
+    geom_point(aes(colour=chr_type, fill=chr_type),shape=21,size=1) +
+    geom_smooth(aes(colour=chr_type), method = "lm", fullrange=TRUE, se=FALSE) +
+    stat_cor(aes(colour=chr_type), show.legend=FALSE, label.y = c(14,15.5), method = "spearman", cor.coef.name = "rho") +
+    facet_wrap(~feature, scales = "free_x") +
+    coord_cartesian(ylim = c(0,16)) +
+    scale_colour_discrete(type = c(col_autosome, col_Z)) +
+    scale_fill_discrete(type = c(col_autosome, col_Z)) +
+    xlab("Proportion") +
+    ylab("Recombination rate (cM/Mb)") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank(),
+          legend.position = c(0.6,0.1))
+
+
+ggsave(plot=corr_prop_rr, file="figures/corr_rec_rate.pdf", height = 9, width = 9)
+
+col_autosome <- "#363838"
+
+corr_prop_rr_sign <- 
+  ggplot(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type!="W"), aes(occ_length, wind_2mb)) +
+    geom_point(aes(colour=chr_type, fill=chr_type),shape=21,size=1) +
+    geom_smooth(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type=="Autosome"), aes(occ_length, wind_2mb), colour=col_autosome, method = "lm", fullrange=TRUE, se=FALSE, linetype="dashed") +
+    geom_smooth(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type=="Autosome" & feature!="LTR"), aes(occ_length, wind_2mb), colour=col_autosome, method = "lm", fullrange=TRUE, se=FALSE) +
+    geom_smooth(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type=="Z"), aes(occ_length, wind_2mb), colour=col_Z, method = "lm", fullrange=TRUE, se=FALSE, linetype="dashed") +
+    geom_smooth(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type=="Z" & feature!="CDS" & feature!="gc" & feature!="LINE" & feature!="SINE" & feature!="LTR"), aes(occ_length, wind_2mb), colour=col_Z, method = "lm", fullrange=TRUE, se=FALSE) +
+    stat_cor(aes(colour=chr_type), show.legend=FALSE, label.y = c(15.5,14), method = "spearman", cor.coef.name = "rho") +
+    facet_wrap(~feature, scales = "free_x") +
+    coord_cartesian(ylim = c(0,16)) +
+    scale_colour_discrete(type = c(col_autosome, col_Z)) +
+    scale_fill_discrete(type = c(col_autosome, col_Z)) +
+    xlab("Proportion") +
+    ylab("Recombination rate (cM/Mb)") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank(),
+          legend.position = c(0.6,0.1))
+
+
+ggsave(plot=corr_prop_rr_sign, file="figures/corr_rec_rate.pdf", height = 9, width = 9)
+
+#back to earlier colour
+col_autosome <- "dark grey"
+
+#proportion without the 4 smallest
+corr_prop_rr_red <- 
+  ggplot(data=subset(rr_repeats_genes_long[!rowSums(is.na(rr_repeats_genes_long[c( "wind_2mb")])),], chr_type!="W" & chrom!= "LR999952.1" & chrom!="LR999954.1" & chrom!="LR999955.1"), aes(occ_length, wind_2mb)) +
+    geom_point(aes(colour=chr_type, fill=chr_type),shape=21,size=1) +
+    geom_smooth(aes(colour=chr_type), method = "lm", fullrange=TRUE, se=FALSE) +
+    stat_cor(aes(colour=chr_type), show.legend=FALSE, label.y = c(14,15.5)) +
+    facet_wrap(~feature, scales = "free_x") +
+    coord_cartesian(ylim = c(0,16)) +
+    scale_colour_discrete(type = c(col_autosome, col_Z)) +
+    scale_fill_discrete(type = c(col_autosome, col_Z)) +
+    xlab("Proportion") +
+    ylab("Recombination rate (cM/Mb)") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank(),
+          legend.position = c(0.6,0.1))
+
+
+```
+
+
+```{r plots_chr_level}
+
+
+#library("gridExtra")
+#grid.arrange(bxp, dp, bp + rremove("x.text"), 
+#             ncol = 2, nrow = 2)
+#or
+#library(ggpubr)
+# figure <- ggarrange(sp, bp + font("x.text", size = 10),
+#                     ncol = 1, nrow = 2)
+# annotate_figure(figure,
+#                 top = text_grob("Visualizing mpg", color = "red", face = "bold", size = 14),
+#                 bottom = text_grob("Data source: \n mtcars data set", color = "blue",
+#                                    hjust = 1, x = 1, face = "italic", size = 10),
+#                 left = text_grob("Figure arranged using ggpubr", color = "green", rot = 90),
+#                 right = "I'm done, thanks :-)!",
+#                 fig.lab = "Figure 1", fig.lab.face = "bold"
+#                 )
+
+#how to run the function: plot_chr_level(VAR)
+
+#assign variable or dataframe for one plot
+#VAR <- df$your_variable
+#assign colour of regression lines and autosomes
+#VAR_colour <- "dark grey"
+
+#y_axis_title <- "Recombination rate (cM/Mb)" 
+#x_axis_title <- "Chromosome length (Mb)"
+
+#run with 
+#plot_chr_level(VAR)
+
+#function definition
+plot_chr_level <- function(VAR_df, VAR){
+  VAR_mean <- aggregate(VAR, by=list(VAR_df$chrom), mean, na.rm=T)
+  VAR_sd <- aggregate(VAR, by=list(VAR_df$chrom), sd, na.rm=T)
+
+ggplot(VAR_mean, aes(unique(VAR_df$chr_length)/1000000, VAR_mean$x)) +
+  geom_smooth(method = "lm", colour=VAR_colour, fill=VAR_colour) +
+  geom_pointrange(aes(ymin=VAR_mean$x-VAR_sd$x, ymax=VAR_mean$x+VAR_sd$x), size=0.2) +
+  geom_point(aes(fill=unique(VAR_df[,c("chrom","chr_type")])$chr_type), size=3, shape=21) +
+  stat_cor(label.x.npc = "left", size = 3, method="spearman", cor.coef.name = "rho") +
+  ylab(y_axis_title) +
+  xlab(x_axis_title) +
+  #scale_colour_discrete(type = c("black", col_W, col_Z)) +
+  scale_fill_discrete(type = col_vector) +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 0.2, colour = "grey"),
+        axis.text = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key = element_blank(),
+        legend.position = c(0.8,0.8),
+        axis.ticks = element_line(size = 0.2, colour = "grey")) #+
+
+}
+
+
+#change this VAR depending on which variable to run
+#rec rate
+VAR_colour <- col_autosome
+y_axis_title <- "Recombination rate (cM/Mb)" 
+x_axis_title <- "Chromosome length (Mb)"
+col_vector <- c(col_autosome, col_Z)
+
+rr_chr_len <- plot_chr_level(rr_repeats_genes_long[rr_repeats_genes_long$chr_type!="W",], rr_repeats_genes_long[rr_repeats_genes_long$chr_type!="W",]$wind_2mb)
+rr_chr_len
+
+#gc
+VAR_colour <- col_autosome
+y_axis_title <- "GC-content (%)" 
+x_axis_title <- "Chromosome length (Mb)"
+col_vector <- c(col_autosome, col_W, col_Z)
+
+gc_chr_len <- plot_chr_level(rr_repeats_genes_long[rr_repeats_genes_long$feature=="gc",], rr_repeats_genes_long[rr_repeats_genes_long$feature=="gc",]$occ_length*100)
+gc_chr_len
+
+#total repeat proportion
+VAR_colour <- col_autosome
+y_axis_title <- "Repeat proportion" 
+x_axis_title <- "Chromosome length (Mb)"
+col_vector <- c(col_autosome, col_W, col_Z)
+
+rpt_prop_chr_len <- plot_chr_level(rr_repeats_genes_long[rr_repeats_genes_long$feature=="rpt",], rr_repeats_genes_long[rr_repeats_genes_long$feature=="rpt",]$occ_length)
+  
+
+#gene proportion
+VAR_colour <- col_autosome
+y_axis_title <- "Gene proportion (CDS)" 
+x_axis_title <- "Chromosome length (Mb)"
+col_vector <- c(col_autosome, col_Z)
+
+gene_prop_chr_len <- plot_chr_level(rr_repeats_genes_long[rr_repeats_genes_long$feature=="CDS" & rr_repeats_genes_long$chr_type!="W",], rr_repeats_genes_long[rr_repeats_genes_long$feature=="CDS" & rr_repeats_genes_long$chr_type!="W",]$occ_length)
+
+#arrange the plots
+#remove legend and  x axis title before plotting
+figure_chr_len <- ggarrange(rr_chr_len + rremove("x.title"), gc_chr_len + rremove("x.title"), rpt_prop_chr_len + rremove("x.title"), gene_prop_chr_len, 
+                    labels = c("Figure 1. A", "B", "C", "D"), ncol = 2, nrow = 2,
+                    common.legend = TRUE, 
+                    legend = "bottom")
+figure_chr_len
+# #annotate_figure(figure, 
+#                 fig.lab = "Figure 1", 
+#                 fig.lab.face = "bold"
+#                 )
+
+
+  
+plot_repeat_class_bar <- function(VAR_df,VAR_x,VAR_y,VAR_group) {
+  ggplot(VAR_df, aes(VAR_x, VAR_y)) +
+    geom_bar(aes(fill=VAR_group), colour="black", stat = "summary", fun = "mean", position = "dodge") +
+    stat_summary(aes(group=VAR_group), fun.data = mean_sd, position = position_dodge(.9), color="black", size=0.2) +
+    ylab(y_axis_title) +
+    xlab(X_axis_title) +
+    scale_fill_discrete(type = c(col_autosome, col_W, col_Z)) +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "grey"),
+          axis.text = element_text(size = 10),
+          axis.title.x = element_text(size = 10),
+          axis.title.y = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_blank(),
+          legend.key = element_blank())
+}
+
+
+
+
+#barplots repeat prop per class and chr_type
+y_axis_title="Proportion"
+X_axis_title="Genomic feature"
+
+repeat_cl_bar_prop <- plot_repeat_class_bar(rr_repeats_genes_long, rr_repeats_genes_long$feature, rr_repeats_genes_long$occ_length, rr_repeats_genes_long$feature) + facet_wrap(~chr_type)
+
+repeat_cl_bar_type <- plot_repeat_class_bar(rr_repeats_genes_long, rr_repeats_genes_long$chr_type, rr_repeats_genes_long$occ_length, rr_repeats_genes_long$chr_type) + facet_wrap(~feature, scales = "free_y")
+
+ggsave(repeat_cl_bar_type, file = "figures/barplot_features_chr_type.pdf", device = "pdf")
+
+#barplots repeat prop per class and chr
+y_axis_title="Proportion"
+X_axis_title="Chromosome"
+
+repeat_cl_bar_chr <- plot_repeat_class_bar(rr_repeats_genes_long, rr_repeats_genes_long$chrom, rr_repeats_genes_long$occ_length, rr_repeats_genes_long$chrom)
+
+repeat_cl_bar_chr +
+      facet_wrap(~feature)
+
+ggsave(repeat_cl_bar_chr +
+      facet_wrap(~feature), file="figures/barplot_features_all_chrom.pdf", device = "pdf")
+
+#barplots repeat length/repeat count per chr
+VAR_df_m=rr_repeats_genes_long
+y_axis_title="Mean length per repeat"
+X_axis_title="Repeat class"
+
+repeat_cl_bar_mean <- plot_repeat_class_bar(VAR_df_m,VAR_df_m$gen_feat,VAR_df_m$length_var/VAR_df_m$count_var,VAR_df_m$chr_type)
+
+#without genes (tot length)
+VAR_df_x=rr_repeats_genes_long[rr_repeats_genes_long$feature!="genes",]
+y_axis_title="Mean length per repeat"
+X_axis_title="Repeat class"
+
+repeat_cl_bar_mean2 <- plot_repeat_class_bar(VAR_df_x,VAR_df_x$gen_feat,VAR_df_x$length_var/VAR_df_x$count_var,VAR_df_x$chr_type)
+
+figure_repeat_bar_class <- ggarrange(repeat_cl_bar_prop, repeat_cl_bar_dens, repeat_cl_bar_mean,repeat_cl_bar_mean2,
+                    labels = c("Figure X. A", "B", "C", "D"), ncol = 2, nrow = 2,
+                    common.legend = TRUE, 
+                    legend = "bottom")
+
+
+#boxplot repeat length/repeat count per chr
+ggplot(rr_repeats_genes_long) +
+  geom_boxplot(aes(chr_type, length_var/count_var, fill=gen_feat)) +
+    ylab("Mean length per genomic feature (bases)") +
+    scale_fill_discrete() +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "grey"),
+          axis.text = element_text(size = 10),
+          axis.title.x = element_text(size = 10),
+          axis.title.y = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_blank(),
+          legend.key = element_blank())
+          #legend.position = c(0.8,0.8)) #+
+
+
+
+
+
+
+```
+
+```{r plots_regional}
+
+#regional variation in genomic features in 2Mb windows along the chromosome folded (0 is the center, 0.5 is the end of the chromosome)
+
+#function definition
+plot_regional_distribution <- function(VAR_df, VAR){
+  ggplot(VAR_df, aes(sqrt((rel_pos-0.5)^2), VAR)) +
+  geom_point(aes(colour=chr_type, fill=chr_type),size=1, shape=21, stroke=0.1) +
+  geom_smooth(method="loess", colour=col_VAR, fill=col_VAR) +
+  scale_colour_discrete(type = col_vector) +
+  scale_fill_discrete(type = col_vector) +
+  #facet_wrap(~chrom, scales = "free_x") +
+  #scale_x_continuous(breaks = seq(1,max(rr_repeats$begin), 2000000)) +
+  ylab(y_axis_title) +
+  xlab("Chromosome position") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 0.2, colour = "grey"),
+        axis.text = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.2, colour = "grey"),
+        legend.title = element_blank(),
+        legend.key = element_blank(),
+        legend.position = "bottom") #+
+}
+
+
+
+
+#def variables
+#rec rate
+y_axis_title <- "Recombination rate (cM/Mb)"
+col_VAR="dark grey"
+col_vector <- c(col_autosome, col_Z)
+regional_rr <- plot_regional_distribution(rr_repeats_genes_long[rr_repeats_genes_long$chr_type!="W",], rr_repeats_genes_long[rr_repeats_genes_long$chr_type!="W",]$wind_2mb)
+
+
+#GC-content
+y_axis_title <- "GC-content (%)"
+#col_VAR="grey"
+col_vector <- c(col_autosome, col_W, col_Z)
+regional_gc <- plot_regional_distribution(rr_repeats_genes_long[rr_repeats_genes_long$feature=="gc",], rr_repeats_genes_long[rr_repeats_genes_long$feature=="gc",]$occ_length*100)
+
+#total repeat proportion
+y_axis_title <- "Repeat proportion"
+#col_VAR=col_repeats
+col_vector <- c(col_autosome, col_W, col_Z)
+regional_rpt_prop <- plot_regional_distribution(subset(rr_repeats_genes_long, feature=="rpt"), subset(rr_repeats_genes_long, feature=="rpt")$occ_length)
+
+#gene proportion
+y_axis_title <- "Gene proportion (CDS)"
+#col_VAR=col_gene
+col_vector <- c(col_autosome, col_Z)
+regional_gene_prop <- plot_regional_distribution(subset(rr_repeats_genes_long, feature=="CDS" & chr_type!="W"), subset(rr_repeats_genes_long, feature=="CDS" & chr_type!="W")$occ_length)
+
+
+
+figure_regional_distr <- ggarrange(regional_rr + rremove("x.title"), regional_gc + rremove("x.title"), regional_rpt_prop + rremove("x.title"), regional_gene_prop,
+                    labels = c("Figure X. A", "B", "C", "D","E", "F"), ncol = 2, nrow = 2,
+                    common.legend = TRUE, 
+                    legend = "bottom")
+
+figure_regional_distr
+
+#combine chr level with regional distr
+comb_chr_regional_distr <- ggarrange(rr_chr_len + rremove("x.title"), gc_chr_len + rremove("x.title"), rpt_prop_chr_len + rremove("x.title"), gene_prop_chr_len + rremove("x.title"), regional_rr + rremove("x.title"), regional_gc + rremove("x.title"), regional_rpt_prop + rremove("x.title"), regional_gene_prop + rremove("x.title"),
+                    labels = c("a", "b", "c", "d", "e", "f", "g", "h"), ncol = 4, nrow = 2, align = "v",
+                    common.legend = TRUE, 
+                    legend = "bottom")
+
+comb_chr_regional_distr
+
+ggsave(comb_chr_regional_distr, file="figures/comb_chr_regional_distr.pdf", "pdf", width = 12, height = 6,dpi = 300)
+ggsave(comb_chr_regional_distr, file="figures/comb_chr_regional_distr.jpeg", "jpeg", width = 12, height = 6)
+
+
+
+#col_VAR=col_gene
+col_vector <- c(col_autosome, col_W, col_Z)
+regional_gene_prop <- plot_regional_distribution(rr_repeats_genes_long, rr_repeats_genes_long$occ_length)
+regional_gene_prop + facet_wrap(~feature, scales = "free_y")
+
+#without W
+col_vector <- c(col_autosome, col_Z)
+
+regional_gene_prop <- plot_regional_distribution(subset(rr_repeats_genes_long, chr_type!="W" & feature!="rpt"), subset(rr_repeats_genes_long, chr_type!="W" & feature!="rpt")$occ_length)
+regional_gene_prop + facet_wrap(~feature, scales = "free_y")
+
+#checking chromosomal distr gc
+ggplot(rr_repeats_genes_long, aes(rel_pos, gc)) +
+  geom_point(aes(colour=chr_type, fill=chr_type),size=1, shape=21) +
+  geom_smooth(method="loess", colour="red", fill="red") +
+  scale_colour_discrete(type = c(col_VAR, col_W, col_Z)) +
+  scale_fill_discrete(type = c("white", col_W, col_Z)) +
+  #facet_wrap(~chrom, scales = "free_x") +
+  #scale_x_continuous(breaks = seq(1,max(rr_repeats$begin), 2000000)) +
+  ylab(y_axis_title) +
+  xlab("Chromosome position") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 0.2, colour = "grey"),
+        axis.text = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key = element_blank(),
+        legend.position = "bottom") #+
+
+
+
+```
+
+
+```{r regional_pos_test}
+#test position
+pos_groups_test <- pairwise.t.test(rr_repeats_genes_long$wind_2mb, rr_repeats_genes_long$pos_group, p.adjust.method = "holm")
+
+pos_groups_test_wil <- pairwise.wilcox.test(rr_repeats_genes_long$wind_2mb, rr_repeats_genes_long$pos_group, p.adjust.method = "holm")
+
+
+capture.output(pos_groups_test, file = "tables/result_regional_pos_pairwise_t_test.txt")
+capture.output(pos_groups_test_wil, file = "tables/result_regional_pos_pairwise_wil_test.txt")
+
+boxplot(rr_repeats_genes_long$wind_2mb~rr_repeats_genes_long$pos_group)
+
+lm_groups <- lm(rr_repeats_genes_long$wind_2mb~rr_repeats_genes_long$pos_group + rr_repeats_genes_long$chr_length)
+anova(lm_groups)
+summary(lm_groups)
+
+
+write.table(aggregate(wind_2mb~pos_group, mean, na.rm=T, data=rr_repeats_genes_long), file = "tables/rr_regional_pos_mean.table")
+write.table(aggregate(wind_2mb~pos_group, sd, na.rm=T, data=rr_repeats_genes_long), file = "tables/rr_regional_pos_mean.table", append = T)
+
+to_compare <- list(c(1,2), c(1,3), c(1,4), c(1,5), c(2,4), c(3,4), c(3,5), c(4,5))
+
+box_rr_regional <- 
+ggplot(rr_repeats_genes_long, aes(pos_group, wind_2mb, group=pos_group)) +
+  geom_boxplot(fill="gray", outlier.shape = 21) +
+  stat_compare_means(comparisons = to_compare, method = "wilcox.test", label.y = c(18, 19.5, 21, 22.5, 16.5, 15, 18, 19.5), label = "p.signif", show.legend = T, position = "left") +
+  xlab("Relative position on the chromosome") +
+  ylab("Recombination rate (cM)") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 0.2, colour = "gray"),
+        axis.ticks = element_line(size = 0.2, colour = "gray"),
+        axis.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank())
+
+ggsave("figures/box_rr_regional.pdf", box_rr_regional, "pdf", width = 6, height = 4)
+ggsave("figures/box_rr_regional.png", box_rr_regional, "png", width = 6, height = 4)
+
+```
+
+
+
+
+```{r lm}
+rr_repeats_genes_wide <- as.data.frame(rr_repeats_genes_wide)
+
+rr_repeats_genes_wide_sc <- cbind(rr_repeats_genes_wide[,c("chrom", "chr_type", "loess", "wind_2mb", "pos_group", "mkr")], scale(rr_repeats_genes_wide$chr_length), scale(rr_repeats_genes_wide$rel_pos), scale(select(rr_repeats_genes_wide, starts_with("occ_"))))
+
+colnames(rr_repeats_genes_wide_sc)
+colnames(rr_repeats_genes_wide_sc)[7] <- "chr_length"
+colnames(rr_repeats_genes_wide_sc)[8] <- "rel_pos"
+
+
+mod_full <- lm(data=rr_repeats_genes_wide_sc, wind_2mb~chr_length + chr_type + mkr + rel_pos + pos_group + occ_length_CDS + occ_length_SINE + occ_length_DNA + occ_length_LINE + occ_length_LTR+occ_length_rpt+occ_length_gc)
+
+capture.output(summary(mod_full), file = "tables/lm_summary_full.txt")
+
+mod_medium <- lm(data=rr_repeats_genes_wide_sc, wind_2mb~chr_length + occ_length_CDS + occ_length_SINE + occ_length_DNA + occ_length_LINE + occ_length_LTR+occ_length_rpt+occ_length_gc)
+
+capture.output(summary(mod_medium), file = "tables/lm_summary_medium.txt")
+
+capture.output(summary(lm(data=rr_repeats_genes_wide_sc, wind_2mb~chr_length + pos_group + occ_length_SINE + occ_length_gc + pos_group:occ_length_SINE)), file = "tables/lm_summary_red_int.txt")
+
+capture.output(summary(lm(data=rr_repeats_genes_wide_sc, wind_2mb~chr_length + occ_length_SINE + occ_length_gc)), file = "tables/lm_summary_min.txt")
+
+capture.output(summary(lmer(data=rr_repeats_genes_wide_sc, wind_2mb~chr_length + (1|chr_type) + (1|pos_group) + occ_length_CDS + occ_length_SINE + occ_length_DNA + occ_length_LINE + occ_length_LTR+occ_length_rpt+occ_length_gc)), file = "tables/lm_summary_mixed_mod.txt")
+
+
+
+#plots
+plot_models(mod_medium, colors = "gs", show.p = T, p.shape = TRUE, 
+            axis.labels = c("chr_length"="Chromosome length", "occ_length_CDS"="CDS", "occ_length_SINE"="SINE",  "occ_length_DNA"="DNA", "occ_length_LINE"="LINE", "occ_length_LTR"="LTR", "occ_length_rpt"="Total repeats", "occ_length_gc"="GC-content")) +
+  geom_hline(yintercept = 0, colour = "black", size = 0.2) +
+    theme(panel.background = element_rect(fill="white"),
+          axis.line = element_line(colour = "black", size=0.2),
+          axis.text.y = element_text(size = 10, colour = "black"),
+          axis.text.x = element_text(size = 10, colour = "black"),
+          axis.ticks.x = element_line(size = 0.2, colour = "black"),
+          axis.ticks.y = element_blank(), 
+          legend.text = element_text(size=10))
+
+ggsave("figures/model_est_medium.pdf", device = "pdf", height = 6, width = 6)
+
+plot_models(mod_full, colors = "gs", show.p = T, p.shape = TRUE) +
+  #scale_y_continuous(limits=c(-0.5, 0.5)) +
+  geom_hline(yintercept = 0, colour = "black", size = 0.2) +
+    theme(panel.background = element_rect(fill="white"),
+          axis.line = element_line(colour = "black", size=0.2),
+          axis.text.y = element_text(size = 10, colour = "black"),
+          axis.text.x = element_text(size = 10, colour = "black"),
+          axis.ticks.x = element_line(size = 0.2, colour = "black"),
+          axis.ticks.y = element_blank(), 
+          legend.text = element_text(size=10))
+
+ggsave("figures/model_est_full.pdf", device = "pdf", height = 8, width = 8)
+
+
+```
+
+
+```{r gained_genes}
+
+#awk '$3=="mRNA"' ~/Documents/GitHub/GenomeVanessa/AnnotationV2/makerrun3.all.maker.rename.proteins.AED50.eAED50.long50.norepeatdomain.no1exon.nooverlap.noW.gff |grep -f data/sp_gains_bestmodel_filtered.txt_genenames.txt - |cut -f1 -d ":" |awk '{print $1, $4, $5, $9 }' |sed 's/ID=//g' > data/gained_genes_position.table
+
+#use filtered file, additional repeats have been removed
+#remove exclamation marks, sed 's/!//g' data/gained_genes_filtered.txt > data/gained_genes_filtered_corr.txt
+gained_genes <- read.table(file = "data/gained_genes_filtered_corr.txt")
+head(gained_genes)
+colnames(gained_genes) <- c("chrom_new", "start_pos", "end_position", "geneID", "genename", "orthogroup")
+
+gained_genes$chrom_new <- as.factor(gained_genes$chrom_new)
+
+rr_repeats_genes_wide$chrom <- as.factor(rr_repeats_genes_wide$chrom)
+rr_repeats_genes_wide$chrom_new <- rr_repeats_genes_wide$chrom
+levels(rr_repeats_genes_wide$chrom_new) <- c("Z", seq(1,15), "W", seq(16,30))
+
+
+gained_genes <- join(gained_genes, unique(rr_repeats_genes_wide[,c("chrom_new", "chr_length")]))
+
+
+for(i in c(1:length(unique(gained_genes$chrom_new)))) {
+gene_gain_pos_temp <- aggregate(gained_genes[gained_genes$chrom_new==unique(gained_genes$chrom_new)[i],c("genename")], #the data frame
+                 by=list(cut(gained_genes[gained_genes$chrom_new==unique(gained_genes$chrom_new)[i],"start_pos"],seq(1, gained_genes$chr_length[gained_genes$chrom_new==unique(gained_genes$chrom_new)[i]][1]+2000000, 2000000))), #the bins (see below) 
+                 length) #the aggregating function
+
+  gene_gain_pos_temp$chrom_new <- unique(gained_genes$chrom_new)[i]
+  
+  
+  if (i==1) {
+    gene_gain_pos <- gene_gain_pos_temp
+  } else {
+  gene_gain_pos <- rbind(gene_gain_pos, gene_gain_pos_temp)
+  }
+}
+
+
+gene_gain_pos$begin <- 
+  as.integer(str_split(gsub(pattern='\\(|\\]', replacement = "", x=gene_gain_pos$Group.1), ",", simplify = TRUE)[,1])
+
+gene_gain_pos$begin <- 
+  ifelse(gene_gain_pos$begin==1, gene_gain_pos$begin, gene_gain_pos$begin + 1)
+
+gene_gain_pos$gained_genes <- gene_gain_pos$x
+
+rr_repeats_genes_wide <- join(rr_repeats_genes_wide, gene_gain_pos[,c("chrom_new", "begin", "gained_genes")])
+
+rr_repeats_genes_wide[is.na(rr_repeats_genes_wide$gained_genes),]$gained_genes <- 0
+
+rr_repeats_genes_wide$gained_genes_presence <- 0
+rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes>0,]$gained_genes_presence <- 1
+
+rr_repeats_genes_wide$gained_genes_presence <- as.factor(rr_repeats_genes_wide$gained_genes_presence)
+
+
+
+#test and plots
+plot(rr_repeats_genes_wide$wind_2mb, rr_repeats_genes_wide$gained_genes)
+plot(rr_repeats_genes_wide$chr_length, rr_repeats_genes_wide$gained_genes)
+
+cor.test(rr_repeats_genes_wide$wind_2mb, rr_repeats_genes_wide$gained_genes, method = "spearman")
+summary(lm(wind_2mb~gained_genes, rr_repeats_genes_wide))
+
+boxplot(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes==0,"wind_2mb"],rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes>0,"wind_2mb"])
+wilcox.test(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes==0,"wind_2mb"],rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes>0,"wind_2mb"])
+
+
+boxplot(rr_repeats_genes_wide$gained_genes~rr_repeats_genes_wide$pos_group)
+
+pairwise.wilcox.test(rr_repeats_genes_wide$gained_genes,rr_repeats_genes_wide$pos_group)
+plot(rr_repeats_genes_wide$rel_pos,rr_repeats_genes_wide$gained_genes)
+
+
+ggplot(rr_repeats_genes_wide, aes(gained_genes_presence, wind_2mb)) +
+  geom_violin() +
+  geom_point() +
+  geom_boxplot()
+  
+ggplot(rr_repeats_genes_wide, aes(gained_genes_presence,occ_length_SINE)) +
+  geom_violin() +
+  geom_point() +
+  geom_boxplot()
+
+wilcox.test(rr_repeats_genes_wide$occ_length_CDS~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$occ_length_gc~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$occ_length_LTR~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$occ_length_LINE~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$occ_length_SINE~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$occ_length_DNA~rr_repeats_genes_wide$gained_genes_presence)
+wilcox.test(rr_repeats_genes_wide$wind_2mb~rr_repeats_genes_wide$gained_genes_presence)
+
+
+summary(lm(gained_genes~occ_length_SINE + occ_length_DNA + occ_length_LINE + occ_length_CDS + occ_length_LTR + occ_length_gc + wind_2mb, data = rr_repeats_genes_wide))
+
+
+rr_repeats_genes_long_gain <- pivot_longer(rr_repeats_genes_wide, cols =starts_with(c("occ_length_")),  names_to ="feature", names_prefix = "occ_length_", values_to = "occ_length")
+
+rr_repeats_genes_long_gain$feature <- as.factor(rr_repeats_genes_long_gain$feature)
+
+rr_repeats_genes_long_gain$feature <- factor(rr_repeats_genes_long_gain$feature, levels = c( "CDS", "rpt", "LTR","LINE", "SINE", "DNA","gc"))
+
+
+
+ggplot(rr_repeats_genes_long_gain, aes(gained_genes_presence, occ_length)) +
+  geom_violin() +
+  geom_point() +
+  geom_boxplot() +
+  stat_compare_means(method = "wilcox.test") +
+  facet_wrap(~feature)
+
+
+#function for split violin 
+#https://stackoverflow.com/questions/35717353/split-violin-plot-with-ggplot2
+GeomSplitViolin <- ggproto("GeomSplitViolin", GeomViolin, 
+                           draw_group = function(self, data, ..., draw_quantiles = NULL) {
+  data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
+  grp <- data[1, "group"]
+  newdata <- plyr::arrange(transform(data, x = if (grp %% 2 == 1) xminv else xmaxv), if (grp %% 2 == 1) y else -y)
+  newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+  newdata[c(1, nrow(newdata) - 1, nrow(newdata)), "x"] <- round(newdata[1, "x"])
+
+  if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+    stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <=
+      1))
+    quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+    aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+    aesthetics$alpha <- rep(1, nrow(quantiles))
+    both <- cbind(quantiles, aesthetics)
+    quantile_grob <- GeomPath$draw_panel(both, ...)
+    ggplot2:::ggname("geom_split_violin", grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+  }
+  else {
+    ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+  }
+})
+
+geom_split_violin <- function(mapping = NULL, data = NULL, stat = "ydensity", position = "identity", ..., 
+                              draw_quantiles = NULL, trim = TRUE, scale = "area", na.rm = FALSE, 
+                              show.legend = NA, inherit.aes = TRUE) {
+  layer(data = data, mapping = mapping, stat = stat, geom = GeomSplitViolin, 
+        position = position, show.legend = show.legend, inherit.aes = inherit.aes, 
+        params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
+}
+
+
+##4d3500", "#d19200"
+
+#all
+gains_violin <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$feature!="rpt",],
+       aes(feature, occ_length, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test") +
+    scale_fill_discrete(type = c("#916400","#FAAB36"), 
+                        labels = c("without gains", ">1 gains")) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+#brown, yellow
+gained_colours <- c("#916400","#FAAB36")
+#CDS is grey in the rest 
+#grey and yellow (nice!)
+gained_colours <- c("#5f6061", "#FAAB36")
+#grey and pink, very pink
+gained_colours <- c("#5f6061", "#f06c70")
+#paler pink, to dark
+gained_colours <- c("#5f6061", "#b37072")
+#discrete but lighter (ok)
+gained_colours <- c("#5f6061", "#d98689")
+#grey and blue
+gained_colours <- c("#a2a2a3", "#282ca6")
+
+#remove gc and rpt
+gains_violin <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$feature!="rpt" & rr_repeats_genes_long_gain$feature!="gc",],
+       aes(feature, occ_length*100, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif", size=5, hide.ns = TRUE, label.y = c(12,20, 48, 16, 12)) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    scale_y_continuous(name = "Occupied length (%)", 
+                       limits = c(0,50)) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+#rec rate
+gains_violin_rec <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$chr_type=="Autosome",],
+       aes(chr_type, wind_2mb, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif", size=5, hide.ns = TRUE) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    ylab("Rec. rate (cM)") +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          axis.text.x = element_blank(),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+#gc
+gains_violin_gc <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$feature=="gc",],
+       aes(feature, occ_length*100, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif", size=5, hide.ns = TRUE, label.y = 42) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    scale_y_continuous(name = "GC-content (%)", 
+                       limits = c(30,43)) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          axis.text.x = element_blank(),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+violin_legend <- get_legend(gains_violin_gc)
+
+ggsave(filename = "figures/violin_gains.pdf",
+  ggarrange(gains_violin, ggarrange(gains_violin_gc + theme(legend.position = "none"), gains_violin_rec + theme(legend.position = "none"), violin_legend, ncol = 3), nrow = 2, heights = c(2,1), legend = "none"),
+  device = "pdf", height = 6, width = 9)
+
+ggsave(filename = "figures/violin_gains_pink.pdf",
+  ggarrange(gains_violin, ggarrange(gains_violin_gc + theme(legend.position = "none"), gains_violin_rec + theme(legend.position = "none"), violin_legend, ncol = 3), nrow = 2, heights = c(2,1), legend = "none"),
+  device = "pdf", height = 6, width = 9)
+
+#with p-value numbers
+gains_violin <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$feature!="rpt" & rr_repeats_genes_long_gain$feature!="gc",],
+       aes(feature, occ_length*100, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", size=5, label.y = c(14,12, 48, 17, 16)) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    scale_y_continuous(name = "Occupied length (%)", 
+                       limits = c(0,50)) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+#rec rate
+gains_violin_rec <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$chr_type=="Autosome",],
+       aes(chr_type, wind_2mb, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", size=5, label.y = 16) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    scale_y_continuous(name = "Rec. rate (cM)",
+                       limits = c(0,17)) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          axis.text.x = element_blank(),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+#gc
+gains_violin_gc <- ggplot(rr_repeats_genes_long_gain[rr_repeats_genes_long_gain$feature=="gc",],
+       aes(feature, occ_length*100, fill=gained_genes_presence)) +
+    geom_split_violin(size=0.2) +
+    stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+               geom = "crossbar", 
+               width = 0.25,
+               position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    stat_compare_means(method = "wilcox.test", size=5, label.y = 43) +
+    scale_fill_discrete(type = gained_colours, 
+                        labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    scale_y_continuous(name = "GC-content (%)",
+                       limits = c(30, 45)) +
+    xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25, colour = "gray"),
+          axis.text.x = element_blank(),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+violin_legend <- get_legend(gains_violin_gc)
+
+
+ggsave(filename = "figures/violin_gains_pvalues.pdf",
+  ggarrange(gains_violin, ggarrange(gains_violin_gc + theme(legend.position = "none"), gains_violin_rec + theme(legend.position = "none"), violin_legend, ncol = 3), nrow = 2, heights = c(2,1), legend = "none"),
+  device = "pdf", height = 6, width = 9)
+
+
+
+gains_bar <- ggplot(rr_repeats_genes_long_gain)+
+    geom_bar(aes(chrom, fill=gained_genes_presence), size=0.2) +
+    # stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+    #            geom = "crossbar", 
+    #            width = 0.25,
+    #            position = position_dodge(width = .25), size = 0.2, show.legend = FALSE) +
+    #stat_compare_means(method = "wilcox.test") +
+    # scale_fill_discrete(type = c("#916400","#FAAB36"), 
+    #                     labels = c(paste("Without gains (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="0",1]),")", sep=""), paste(">=1 gain (N=", length(rr_repeats_genes_wide[rr_repeats_genes_wide$gained_genes_presence=="1",1]),")", sep=""))) +
+    # xlab("") +
+    theme(panel.background = element_blank(),
+          axis.line = element_line(size = 0.2, colour = "gray"),
+          axis.title = element_text(size = 10),
+          axis.ticks = element_line(size = 0.25),
+          axis.text.x = element_blank(),
+          legend.text = element_text(size = 10),
+          legend.key=element_blank(),
+          legend.title = element_blank())
+
+
+
+
+```
+
