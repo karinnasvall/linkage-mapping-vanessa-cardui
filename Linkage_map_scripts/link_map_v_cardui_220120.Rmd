@@ -1,0 +1,613 @@
+---
+title: "order_vanessa_zlim_dtol"
+author: "KN"
+date: "06-01-22"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, echo=FALSE, include=FALSE}
+library(ggplot2)
+library(viridis)
+library("tidyr")
+library(dplyr)
+
+```
+
+##Linkage map V.cardui
+Pedigree: 1 wildcought female + 90 offspring (5 filtered du to low coverage (< 0.1 Mreads))
+Raw data filtration:  Clonefilter, ProcessRadtags.
+Mapping to DTOL
+
+
+#LepMap 
+ParentCall with default settings, zlimit=2
+W and mt removed
+Markers in regions overlappng repeats were removed with bedtools intersect. BEDTools/2.29.2
+Input not binned
+
+Sep chr  lod 24, 32 lg size > 60 (smallest 64 markers)Z-chr split in 2 lg remove one z (only inf in female not in male?)
+JoinSingles 18
+
+Ordermarkers mask1 
+
+
+
+```{r check_sep_chrom, eval=F}
+#check that only correct maps summary lines are included, and remove excessive lines
+#awk 'NR<73 {print $0}' maps.summary.txt > maps.summary_mod.txt
+#and make a csv of it to remove risk of empty values being shifted
+
+maps_sum <- read.csv("maps.summary.csv", sep = ";", header = T, fill=T)
+str(maps_sum)
+maps_sum_long <- gather(maps_sum, -LG, key = "lod_lim", value = nr_markers)
+str(maps_sum_long)
+maps_sum_long[is.na(maps_sum_long)] = 0
+
+ggplot(maps_sum_long) +
+  geom_line(aes(LG, nr_markers, colour=lod_lim)) +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_continuous(expand = c(0,0)) +
+  coord_cartesian(xlim = c(0,40), ylim = c(0,200)) +
+  xlab(label = "Number of linkage groups") +
+  ylab(label = "Number of markers") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 0.2, colour="grey"),
+        axis.ticks = element_line(size = 0.2, colour="grey"),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+  
+ggplot(maps_sum_long) +
+  geom_tile(aes(lod_lim, LG, fill=nr_markers)) +
+  geom_hline(yintercept = 31) +
+  #geom_line(aes(LG, nr_markers, colour=lod_lim)) +
+  #geom_bar(aes(maps_sum_long$LG, maps_sum_long$nr_markers, fill=lod_lim), stat = "identity", position = "dodge") +
+  scale_y_continuous(expand = c(0,0)) +
+  scale_x_discrete(expand = c(0,0)) +
+  coord_cartesian(ylim = c(0,40)) +
+  scale_fill_distiller(type = "seq", na.value = "black", palette = "Greys", direction = 1, limits=c(0,200)) +
+  xlab(label = "LodLimit") +
+  ylab(label = "Number of linkage groups") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(size = 1),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(size = 10, angle = 90),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))
+
+  
+
+```
+
+```{r maps_before_trim, eval=TRUE, echo=FALSE}
+
+
+plot_title="before trim"
+map_order=read.table("../01_ordermarkers_mask1_mapped/order_all.txt")
+
+head(map_order)
+str(map_order)
+
+#maps sorted after lg
+ggplot(map_order) +
+  #geom_point() +
+  #geom_linerange(data=map_order, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  #geom_point(data=map_order, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_order, mapping=aes(x=V4, y=V2, colour=V3), size=0.5) +
+  facet_wrap(~map_order$V5, scales="free_y") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+
+ggplot(map_order) +
+  #geom_point() +
+  #geom_linerange(data=map_order, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  #geom_point(data=map_order, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_order, mapping=aes(x=V4, y=V2, colour=V5), size=0.5) +
+  facet_wrap(~map_order$V3, scales="free_y") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+```
+```{r maps_after_trim, eval=TRUE, echo=FALSE}
+
+
+plot_title="after trimming"
+map_for_HiC=read.table("../02_filt_OrderMarker_eval_int/order_all_int.txt")
+
+head(map_for_HiC)
+str(map_for_HiC)
+
+#remove more uncertainty than 20
+#map_for_HiC=map_for_HiC[(map_for_HiC$V6-map_for_HiC$V5) < 21,]
+map_for_HiC$V7 <-1
+map_for_HiC$V7 <- as.factor(map_for_HiC$V7)
+map_for_HiC$V3 <- as.factor(map_for_HiC$V3)
+
+
+#maps sorted after scaffold
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V3), size=0.5) +
+  facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#maps sorted after lg
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  facet_wrap(~map_for_HiC$V3, scales="free_y") +
+  ggpubr::stat_cor(aes(x=V2, y=(V5+V6)/2, colour=NULL), method = "pearson",
+  cor.coef.name = "R",
+  label.sep = ", ",
+  r.accuracy = 0.01,
+  p.accuracy = 0.0001,
+  label.x.npc = 0.25,
+  label.y.npc = "top",
+  geom = "text",
+  size = 2,
+  show.legend = NA) +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+```
+
+```{r maps_after_trim_reorder, eval=TRUE, echo=FALSE}
+
+
+plot_title="after trimming and reorder"
+map_for_HiC=read.table("../02_filt_OrderMarker_eval_improve_int/order_all_int.txt")
+
+head(map_for_HiC)
+str(map_for_HiC)
+
+#remove more uncertainty than 20
+#map_for_HiC=map_for_HiC[(map_for_HiC$V6-map_for_HiC$V5) < 21,]
+map_for_HiC$V7 <-1
+map_for_HiC$V7 <- as.factor(map_for_HiC$V7)
+map_for_HiC$V3 <- as.factor(map_for_HiC$V3)
+
+
+#maps sorted after scaffold
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V3), size=0.5) +
+  facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#maps sorted after lg
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  facet_wrap(~map_for_HiC$V3, scales="free_y") +
+  ggpubr::stat_cor(aes(x=V2, y=(V5+V6)/2, colour=NULL), method = "pearson",
+  cor.coef.name = "R",
+  label.sep = ", ",
+  r.accuracy = 0.01,
+  p.accuracy = 0.0001,
+  label.x.npc = 0.25,
+  label.y.npc = "top",
+  geom = "text",
+  size = 2,
+  show.legend = NA) +
+#scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+```
+
+
+```{r maps_after_auto_trim, eval=TRUE, echo=FALSE}
+
+
+plot_title="after_auto_trim"
+map_for_HiC=read.table("mapped_int_mask1/order_int_all.txt")
+
+head(map_for_HiC)
+str(map_for_HiC)
+
+#remove more uncertainty than 20
+map_for_HiC=map_for_HiC[(map_for_HiC$V6-map_for_HiC$V5) < 21,]
+map_for_HiC$V7 <-1
+map_for_HiC$V7 <- as.factor(map_for_HiC$V7)
+map_for_HiC$V3 <- as.factor(map_for_HiC$V3)
+
+
+#maps sorted after scaffold
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V3), size=0.5) +
+  facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#maps sorted after lg
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  facet_wrap(~map_for_HiC$V3, scales="free_y") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+```
+
+
+```{r maps_before_filtering_mask13, eval=TRUE, echo=FALSE}
+
+
+plot_title="before filtering_mask13"
+map_for_HiC=read.table("order_int_all_mask13.txt")
+
+head(map_for_HiC)
+str(map_for_HiC)
+
+#remove more uncertainty than 20
+map_for_HiC=map_for_HiC[(map_for_HiC$V6-map_for_HiC$V5) < 21,]
+map_for_HiC$V7 <-1
+map_for_HiC$V7 <- as.factor(map_for_HiC$V7)
+map_for_HiC$V3 <- as.factor(map_for_HiC$V3)
+
+
+#maps sorted after scaffold
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V3), size=0.5) +
+  facet_wrap(~map_for_HiC$V1, scales="free_y") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#only 52
+ggplot(map_for_HiC[map_for_HiC$V3=="28",]) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#only #54
+ggplot(map_for_HiC[map_for_HiC$V3=="29",]) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+ggplot(map_for_HiC[map_for_HiC$V3=="31",]) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+map_28_mod <- read.table("chr_54_55/OrderMarker_eval_order/ordered.28.1.intervals.mapped")
+plot_title=unique(map_28_mod$V4)
+
+ggplot(map_28_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+
+map_29_mod <- read.table("chr_54_55/OrderMarker_eval_order/ordered.29.1.intervals.mapped")
+plot_title=unique(map_29_mod$V4)
+
+ggplot(map_29_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+map_31_mod <- read.table("chr_54_55/OrderMarker_eval_order/ordered.31.1.intervals.mapped")
+plot_title=unique(map_31_mod$V4)
+ggplot(map_31_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+
+```
+
+```{r maps_after_trim_thin_reorder, eval=TRUE, echo=FALSE}
+
+
+plot_title="maps_after_trim_thin_reorder"
+map_for_HiC=read.table("../03_filt_order_all_thin_eval/order_all_int.txt")
+
+head(map_for_HiC)
+str(map_for_HiC)
+
+#remove more uncertainty than 20
+#map_for_HiC=map_for_HiC[(map_for_HiC$V6-map_for_HiC$V5) < 21,]
+map_for_HiC$V7 <-1
+map_for_HiC$V7 <- as.factor(map_for_HiC$V7)
+map_for_HiC$V3 <- as.factor(map_for_HiC$V3)
+
+
+#maps sorted after scaffold
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V3), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V3), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V3), size=0.5) +
+  facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+#maps sorted after lg
+ggplot(map_for_HiC) +
+  #geom_point() +
+  geom_linerange(data=map_for_HiC, mapping=aes(x=V2, ymin=V5, ymax=V6, colour=V1), size=0.2) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V5, colour=V1), size=0.5) +
+  geom_point(data=map_for_HiC, mapping=aes(x=V2, y=V6, colour=V1), size=0.5) +
+  facet_wrap(~map_for_HiC$V3, scales="free_y") +
+  ggpubr::stat_cor(aes(x=V2, y=(V5+V6)/2, colour=NULL), method = "pearson",
+  cor.coef.name = "R",
+  label.sep = ", ",
+  r.accuracy = 0.01,
+  p.accuracy = 0.0001,
+  label.x.npc = 0.25,
+  label.y.npc = "top",
+  geom = "text",
+  size = 2,
+  show.legend = NA) +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+```
+
+```{r maps_54_55}
+
+
+map_29_mod <- read.table("filt_order_all_eval/reeval_54_55/ordered.29.1.intervals.mapped")
+plot_title=unique(map_29_mod$V4)
+
+ggplot(map_29_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+map_31_mod <- read.table("filt_order_all_eval/reeval_54_55/ordered.31.1.intervals.mapped")
+plot_title=unique(map_31_mod$V4)
+ggplot(map_31_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+
+
+```
+
+
+```{r maps_55}
+
+
+
+map_31_mod <- read.table("chr_54_55/last_reeval_55/Ordermarker_reeval_thin/ordered.31.1.intervals.mapped")
+plot_title=unique(map_31_mod$V4)
+ggplot(map_31_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+
+map_31_mod <- read.table("chr_54_55/last_reeval_55/Ordermarker_reeval_thin_mod/ordered.31.1.intervals.mapped")
+plot_title=unique(map_31_mod$V4)
+ggplot(map_31_mod) +
+  #geom_point() +
+  geom_linerange(mapping=aes(x=V5, ymin=V2, ymax=V3, colour=V4), size=0.2) +
+  geom_point(mapping=aes(x=V5, y=V2, colour=V4), size=0.5) +
+  geom_point(mapping=aes(x=V5, y=V3, colour=V4), size=0.5) +
+  #facet_wrap(~map_for_HiC$V1, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+
+```
+
+```{r maps_for_ms}
+
+map_ordered <- read.table("../maps_for_ms/order_all_dist.txt")
+colnames(map_ordered) <- c("marker_nr", "male_position", "scaffold", "position")
+str(map_ordered)
+head(map_ordered)
+map_ordered$scaffold <- as.factor(map_ordered$scaffold)
+
+
+map_interval <- read.table("maps_for_ms/order_all_int.txt")
+colnames(map_interval) <- c("marker_nr", "int_min", "int_max", "scaffold", "position")
+str(map_interval)
+head(map_interval)
+map_interval$scaffold <- as.factor(map_interval$scaffold)
+
+
+
+plot_title="maps for ms"
+paste("Result for:", plot_title)
+
+#Number of markers in map
+paste("Number of markers in LG:", length(map_ordered$position))
+
+apply(map_ordered[c("scaffold")], 2, table)
+
+#maplength
+print("Map length per scaffold min and max: ")
+#cbind(aggregate(map_ordered$distance_min, list(map_ordered$scaffold), max), aggregate(map_ordered$distance_max, list(map_ordered$scaffold), max))
+aggregate(map_ordered$male_position, list(map_ordered$scaffold), max)
+paste("Total map length (cM): ",sum(aggregate(map_ordered$male_position, list(map_ordered$scaffold), max)$x))
+
+paste("Appr recombination rate (cM/Mb):", sum(aggregate(map_ordered$male_position, list(map_ordered$scaffold), max)$x)/sum(aggregate(map_ordered$position, list(map_ordered$scaffold), max)$x)*1000000)
+
+#total length to get cM divide by nr of offspring then *100
+paste("Total map length (cM), min:", 100*sum(aggregate(map_interval$int_min, list(map_interval$scaffold), max)[,2])/90)
+paste("Total map length (cM), max:", 100*sum(aggregate(map_interval$int_max, list(map_interval$scaffold), max)[,2])/90)
+
+
+#map_ordered_plot
+plot_title="Maps for ms"
+
+ggplot(map_ordered) +
+  geom_point(mapping=aes(x=position, y=male_position), size=0.5) +
+  facet_wrap(~map_ordered$scaffold, scales="free_y") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance (cM)") +
+  theme_classic()
+
+#map_interval_plot 
+
+ggplot(map_interval) +
+  geom_linerange(mapping=aes(x=position, ymin=int_min, ymax=int_max), size=0.2) +
+  geom_point(mapping=aes(x=position, y=int_min), size=0.5) +
+  geom_point(mapping=aes(x=position, y=int_max), size=0.5) +
+  facet_wrap(~map_interval$scaffold, scales="free") +
+  #scale_colour_manual(values = c("grey14", "red")) +
+  guides(colour=FALSE) +
+  labs(title = plot_title) +
+  xlab("Position (bp)") +
+  ylab("Distance, #recombinations") +
+  theme_classic()
+
+
+
+
+```
+
