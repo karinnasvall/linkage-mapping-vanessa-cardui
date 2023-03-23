@@ -1,0 +1,74 @@
+	Pearson's product-moment correlation
+
+data:  rec_rate_mean$wind_2mb and rec_rate_mean$chr_length
+t = -7.2124, df = 29, p-value = 6.109e-08
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ -0.9000705 -0.6241616
+sample estimates:
+       cor 
+-0.8012851 
+
+
+	Pearson's product-moment correlation
+
+data:  rec_rate_mean[1:27, ]$wind_2mb[1:27] and rec_rate_mean[1:27, ]$chr_length
+t = -5.6768, df = 25, p-value = 6.545e-06
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ -0.8796008 -0.5181802
+sample estimates:
+       cor 
+-0.7504239 
+
+
+	Pearson's product-moment correlation
+
+data:  rec_rate_mean$wind_2mb and rec_rate_mean$marker_density
+t = -1.8718, df = 29, p-value = 0.07135
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ -0.61151371  0.02945257
+sample estimates:
+       cor 
+-0.3283139 
+
+
+	Pearson's product-moment correlation
+
+data:  rec_rate_mean$chr_length and rec_rate_mean$marker_density
+t = 4.273, df = 29, p-value = 0.0001898
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ 0.3427182 0.7997672
+sample estimates:
+     cor 
+0.621575 
+
+
+	Pairwise comparisons using t tests with pooled SD 
+
+data:  rec_rate$wind_2mb and rec_rate$pos_group 
+
+  1       2       3       4     
+2 0.6533  -       -       -     
+3 0.4974  0.6533  -       -     
+4 4.9e-11 1.0e-08 8.8e-07 -     
+5 0.0017  0.0241  0.1031  0.0174
+
+P value adjustment method: holm 
+
+	
+
+	Welch Two Sample t-test
+
+data:  rec_rate$wind_2mb by rec_rate$chr_type
+t = 2.9985, df = 96.517, p-value = 0.00345
+alternative hypothesis: true difference in means between group Autosome and group Z is not equal to 0
+95 percent confidence interval:
+ 0.2586434 1.2715279
+sample estimates:
+mean in group Autosome        mean in group Z 
+              3.857802               3.092716 
+
+
